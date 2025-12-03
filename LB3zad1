@@ -1,0 +1,78 @@
+# Задание 1:
+# 1 Cоздаём тензор x целочисленного типа, хранящий случайное значение.
+
+import torch
+import numpy as np
+
+print("=" * 50)
+print("ЗАДАНИЕ 1")
+print("=" * 50)
+
+# 1. Создаем тензор целочисленного типа со случайным значением
+# Создаем тензор с одним случайным целым числом в диапазоне от 1 до 100
+x = torch.randint(1, 100, (1,), dtype=torch.int32)
+print(f"1. Тензор x (целочисленный): {x}")
+print(f"   Тип данных: {x.dtype}")
+print(f"   Размер: {x.size()}")
+
+# 2. Преобразуйте тензор к типу float32
+print("\n2. Преобразуем тензор к типу float32:")
+x = x.to(dtype=torch.float32)
+print(f"   Тензор x после преобразования: {x}")
+print(f"   Тип данных: {x.dtype}")
+
+# Для вычисления градиентов устанавливаем requires_grad=True
+x.requires_grad = True
+print(f"   requires_grad установлен в: {x.requires_grad}")
+
+# 3. Проводим с тензором x ряд операций:
+print("\n3. Выполняем операции с тензором x:")
+
+# – возведение в степень n, где n = 3;
+n = 3
+print(f"   a) Возведение в степень {n}:")
+y1 = x ** n
+print(f"      x^{n} = {y1.item()}")
+
+# – умножение на случайное значение в диапазоне от 1 до 10;
+print(f"   b) Умножение на случайное значение от 1 до 10:")
+# Создаем случайное число от 1 до 10
+random_multiplier = torch.rand(1) * 9 + 1  # [0,1)*9+1 = [1,10)
+print(f"      Случайный множитель: {random_multiplier.item():.4f}")
+y2 = y1 * random_multiplier
+print(f"      Результат: {y2.item():.4f}")
+
+# – берём экспоненту от полученного числа.
+print(f"   c) Взятие экспоненты:")
+y3 = torch.exp(y2)
+print(f"      exp({y2.item():.4f}) = {y3.item():.4f}")
+
+# Сохраняем финальный результат для вычисления градиента
+final_result = y3
+
+# 4. Вычисляем и выведим на экран значение производной для полученного в п.3 значения по x.
+print("\n4. Вычисляем производную:")
+# Вызываем backward() для вычисления градиентов
+final_result.backward()
+
+# Градиент dy/dx теперь хранится в x.grad
+print(f"   Значение производной d(y)/dx = {x.grad.item():.4f}")
+
+# Проверим вычисление производной аналитически:
+# y = exp(x^3 * k), где k - случайный множитель
+# dy/dx = exp(x^3 * k) * 3x^2 * k
+k = random_multiplier.item()
+x_value = x.detach().item()  # получаем значение без градиентов
+analytical_derivative = torch.exp(torch.tensor(x_value**3 * k)) * 3 * x_value**2 * k
+print(f"   Проверка аналитически: {analytical_derivative.item():.4f}")
+
+print("\n" + "=" * 50)
+print("ПРОВЕРКА ВЫЧИСЛЕНИЙ:")
+print("=" * 50)
+print(f"Исходное значение x: {x_value}")
+print(f"Случайный множитель k: {k:.4f}")
+print(f"x^{n} = {x_value**n}")
+print(f"x^{n} * k = {x_value**n * k:.4f}")
+print(f"exp(x^{n} * k) = {torch.exp(torch.tensor(x_value**n * k)).item():.4f}")
+print(f"Градиент (автоматически): {x.grad.item():.4f}")
+print(f"Градиент (аналитически): {analytical_derivative.item():.4f}")
