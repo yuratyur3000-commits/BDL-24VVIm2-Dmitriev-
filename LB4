@@ -1,0 +1,446 @@
+import torch
+import torch.nn as nn
+import numpy as np
+import pandas as pd
+import os
+import matplotlib.pyplot as plt
+
+print("=" * 70)
+print("СОЗДАНИЕ НЕЙРОННОЙ СЕТИ НА PyTorch")
+print("=" * 70)
+
+# Определяем тип задачи (классификация или регрессия)
+if (4 % 2) == 1:
+    task_type = 'classification'
+    print("\nЗАДАЧА: КЛАССИФИКАЦИЯ")
+    print("Классификация покупателей на классы 'купит' - 'не купит'")
+    print("Признаки: возраст и доход (1й и 2й столбцы)")
+    print("Целевая переменная: покупка (3й столбец)")
+else:
+    task_type = 'regression'
+    print("\nЗАДАЧА: РЕГРЕССИЯ")
+    print("Предсказание дохода по возрасту")
+    print("Признак: возраст (1й столбец)")
+    print("Целевая переменная: доход (2й столбец)")
+
+# 1. Загрузка данных
+print("\n" + "=" * 70)
+print("1. ЗАГРУЗКА ДАННЫХ")
+
+# Путь к файлу
+file_path = r'C:\Users\Юрий\Documents\ИТК\ПГУ\Магистрат\ВТ\2КУРС\Нейронные\4_Создание нейронной сети на pytorch-20250918T141350Z-1-001\4_Создание нейронной сети на pytorch\dataset_simple.csv'
+
+try:
+    # Проверяем существование файла
+    if os.path.exists(file_path):
+        df = pd.read_csv(file_path)
+        print(f"✓ Файл успешно загружен: {file_path}")
+        print(f"  Размер данных: {df.shape}")
+        print(f"  Столбцы: {list(df.columns)}")
+        print("\n  Первые 5 строк данных:")
+        print(df.head())
+    else:
+        print(f"✗ Файл не найден: {file_path}")
+        print("  Создаем тестовые данные...")
+        
+        # Создаем тестовые данные
+        np.random.seed(42)
+        n_samples = 200
+        
+        if task_type == 'classification':
+            # Для классификации: возраст, доход, покупка (0/1)
+            data = {
+                'age': np.random.uniform(18, 70, n_samples),
+                'income': np.random.uniform(20000, 150000, n_samples),
+                'purchase': np.random.choice([0, 1], n_samples, p=[0.6, 0.4])
+            }
+            # Добавляем некоторую зависимость
+            for i in range(n_samples):
+                if data['age'][i] > 40 and data['income'][i] > 80000:
+                    data['purchase'][i] = 1
+                elif data['age'][i] < 25 and data['income'][i] < 40000:
+                    data['purchase'][i] = 0
+        else:
+            # Для регрессии: возраст, доход
+            data = {
+                'age': np.random.uniform(18, 70, n_samples),
+                'income': np.random.uniform(20000, 150000, n_samples)
+            }
+            # Добавляем линейную зависимость с шумом
+            data['income'] = 10000 + 2000 * data['age'] + np.random.randn(n_samples) * 10000
+        
+        df = pd.DataFrame(data)
+        print(f"  Создан DataFrame с {n_samples} примерами")
+        print(df.head())
+
+except Exception as e:
+    print(f"✗ Ошибка при загрузке данных: {e}")
+    exit()
+
+# 2. Подготовка данных
+print("\n" + "=" * 70)
+print("2. ПОДГОТОВКА ДАННЫХ")
+
+if task_type == 'classification':
+    # Для классификации
+    print("  Подготовка данных для классификации...")
+    
+    # Берем признаки (возраст и доход)
+    X = torch.Tensor(df.iloc[:, 0:2].values)  # первые 2 столбца
+    # Берем целевую переменную (покупка)
+    y = df.iloc[:, 2].values  # 3й столбец
+    y = torch.Tensor(y.reshape(-1, 1))  # преобразуем в тензор
+    
+    print(f"  Признаки X: {X.shape}")
+    print(f"  Целевая переменная y: {y.shape}")
+    print(f"  Количество классов: {len(np.unique(y.numpy()))}")
+    
+    # Статистика по классам
+    unique, counts = np.unique(y.numpy(), return_counts=True)
+    for cls, cnt in zip(unique, counts):
+        print(f"  Класс {int(cls)}: {cnt} примеров ({cnt/len(y)*100:.1f}%)")
+
+else:
+    # Для регрессии
+    print("  Подготовка данных для регрессии...")
+    
+    # Берем признак (возраст) - 1й столбец
+    X = torch.Tensor(df.iloc[:, [0]].values)  # возраст
+    # Берем целевую переменную (доход) - 2й столбец
+    y = torch.Tensor(df.iloc[:, [1]].values)  # доход
+    
+    print(f"  Признак X (возраст): {X.shape}")
+    print(f"  Целевая переменная y (доход): {y.shape}")
+    
+    # Нормализация данных для лучшей сходимости
+    X_mean, X_std = X.mean(), X.std()
+    y_mean, y_std = y.mean(), y.std()
+    
+    X_normalized = (X - X_mean) / X_std
+    y_normalized = (y - y_mean) / y_std
+    
+    print(f"  Средний возраст: {X_mean:.1f} ± {X_std:.1f}")
+    print(f"  Средний доход: {y_mean:.1f} ± {y_std:.1f}")
+
+# 3. Создание нейронной сети
+print("\n" + "=" * 70)
+print("3. СОЗДАНИЕ НЕЙРОННОЙ СЕТИ")
+
+if task_type == 'classification':
+    # Нейронная сеть для классификации
+    class ClassificationNet(nn.Module):
+        def __init__(self, input_size, hidden_size, output_size):
+            super(ClassificationNet, self).__init__()
+            self.layers = nn.Sequential(
+                nn.Linear(input_size, hidden_size),
+                nn.ReLU(),
+                nn.Linear(hidden_size, hidden_size),
+                nn.ReLU(),
+                nn.Linear(hidden_size, output_size),
+                nn.Sigmoid()  # для бинарной классификации
+            )
+        
+        def forward(self, x):
+            return self.layers(x)
+    
+    # Параметры сети
+    input_size = X.shape[1]  # 2 признака: возраст и доход
+    hidden_size = 10
+    output_size = 1  # 1 выход: вероятность покупки
+    
+    model = ClassificationNet(input_size, hidden_size, output_size)
+    print("  Создана сеть для классификации")
+    
+else:
+    # Нейронная сеть для регрессии
+    class RegressionNet(nn.Module):
+        def __init__(self, input_size, hidden_size, output_size):
+            super(RegressionNet, self).__init__()
+            self.layers = nn.Sequential(
+                nn.Linear(input_size, hidden_size),
+                nn.ReLU(),
+                nn.Linear(hidden_size, hidden_size),
+                nn.ReLU(),
+                nn.Linear(hidden_size, output_size)
+                # Нет функции активации на выходе для регрессии
+            )
+        
+        def forward(self, x):
+            return self.layers(x)
+    
+    # Параметры сети
+    input_size = X_normalized.shape[1]  # 1 признак: возраст
+    hidden_size = 8
+    output_size = 1  # 1 выход: доход
+    
+    model = RegressionNet(input_size, hidden_size, output_size)
+    print("  Создана сеть для регрессии")
+
+print(f"  Архитектура сети:\n{model}")
+print(f"  Количество параметров: {sum(p.numel() for p in model.parameters())}")
+
+# 4. Обучение нейронной сети
+print("\n" + "=" * 70)
+print("4. ОБУЧЕНИЕ НЕЙРОННОЙ СЕТИ")
+
+if task_type == 'classification':
+    # Для классификации
+    criterion = nn.BCELoss()  # Binary Cross Entropy Loss
+    learning_rate = 0.01
+else:
+    # Для регрессии
+    criterion = nn.MSELoss()  # Mean Squared Error Loss
+    learning_rate = 0.001
+
+optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+
+# Параметры обучения
+epochs = 200
+losses = []
+
+print(f"  Функция потерь: {criterion.__class__.__name__}")
+print(f"  Оптимизатор: Adam")
+print(f"  Скорость обучения: {learning_rate}")
+print(f"  Количество эпох: {epochs}")
+
+# Обучение
+for epoch in range(epochs):
+    if task_type == 'classification':
+        outputs = model(X)
+        loss = criterion(outputs, y)
+    else:
+        outputs = model(X_normalized)
+        loss = criterion(outputs, y_normalized)
+    
+    # Обратное распространение и оптимизация
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    
+    losses.append(loss.item())
+    
+    # Вывод прогресса каждые 20 эпох
+    if (epoch + 1) % 20 == 0:
+        print(f"  Эпоха [{epoch+1:3d}/{epochs}], Потеря: {loss.item():.6f}")
+
+# 5. Оценка результатов
+print("\n" + "=" * 70)
+print("5. ОЦЕНКА РЕЗУЛЬТАТОВ")
+
+if task_type == 'classification':
+    # Оценка классификации
+    with torch.no_grad():
+        predictions = model(X)
+        predicted_classes = (predictions > 0.5).float()
+        
+        accuracy = (predicted_classes == y).float().mean()
+        print(f"  Точность классификации: {accuracy.item() * 100:.2f}%")
+        
+        # Матрица ошибок (вычисляем вручную без scikit-learn)
+        tp = torch.sum((predicted_classes == 1) & (y == 1)).item()
+        tn = torch.sum((predicted_classes == 0) & (y == 0)).item()
+        fp = torch.sum((predicted_classes == 1) & (y == 0)).item()
+        fn = torch.sum((predicted_classes == 0) & (y == 1)).item()
+        
+        print(f"\n  Матрица ошибок:")
+        print(f"                Предсказано")
+        print(f"                Нет   Да")
+        print(f"  Фактически Нет {tn:4d}  {fp:4d}")
+        print(f"              Да {fn:4d}  {tp:4d}")
+        
+        # Вычисляем метрики вручную
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+        
+        print(f"\n  Отчет по классификации:")
+        print(f"              precision    recall  f1-score   support")
+        print(f"  Не купит    {tn/(tn+fn) if (tn+fn)>0 else 0:10.2f} {tn/(tn+fp) if (tn+fp)>0 else 0:10.2f} {2*(tn/(tn+fn))*(tn/(tn+fp))/((tn/(tn+fn))+(tn/(tn+fp))) if (tn+fn)>0 and (tn+fp)>0 and (tn/(tn+fn)+tn/(tn+fp))>0 else 0:10.2f} {tn+fp:9d}")
+        print(f"  Купит       {precision:10.2f} {recall:10.2f} {f1:10.2f} {tp+fn:9d}")
+        print(f"  accuracy    {accuracy.item():37.2f} {len(y):9d}")
+        
+        # Примеры предсказаний
+        print("\n  Примеры предсказаний (первые 10):")
+        print("  №  |  Возраст |  Доход  | Факт | Прогноз | Вер-ть |")
+        print("  " + "-" * 55)
+        for i in range(min(10, len(X))):
+            age = X[i, 0].item()
+            income = X[i, 1].item()
+            actual = "Купит" if y[i].item() > 0.5 else "Не купит"
+            predicted = "Купит" if predicted_classes[i].item() > 0.5 else "Не купит"
+            prob = predictions[i].item()
+            print(f"  {i+1:2d} | {age:7.1f} | {income:7.0f} | {actual:6s} | {predicted:7s} | {prob:6.2%} |")
+
+else:
+    # Оценка регрессии
+    with torch.no_grad():
+        predictions_normalized = model(X_normalized)
+        
+        # Денормализуем предсказания
+        predictions = predictions_normalized * y_std + y_mean
+        
+        # Вычисляем метрики
+        mae = torch.mean(torch.abs(predictions - y))
+        mse = torch.mean((predictions - y) ** 2)
+        rmse = torch.sqrt(mse)
+        
+        print(f"  Средняя абсолютная ошибка (MAE): {mae.item():.2f} руб.")
+        print(f"  Среднеквадратичная ошибка (MSE): {mse.item():.2f}")
+        print(f"  Корень из MSE (RMSE): {rmse.item():.2f} руб.")
+        
+        # R-квадрат (вычисляем вручную)
+        ss_res = torch.sum((y - predictions) ** 2)
+        ss_tot = torch.sum((y - torch.mean(y)) ** 2)
+        r2 = 1 - ss_res / ss_tot
+        print(f"  R² (коэффициент детерминации): {r2.item():.4f}")
+        
+        print("\n  Примеры предсказаний (первые 10):")
+        print("  №  |  Возраст |  Факт.доход | Прогн.доход |  Ошибка  |")
+        print("  " + "-" * 60)
+        for i in range(min(10, len(X))):
+            age = X[i, 0].item()
+            actual_income = y[i, 0].item()
+            predicted_income = predictions[i, 0].item()
+            error = actual_income - predicted_income
+            print(f"  {i+1:2d} | {age:8.1f} | {actual_income:11.0f} | {predicted_income:11.0f} | {error:8.0f} |")
+
+# 6. Визуализация результатов
+print("\n" + "=" * 70)
+print("6. ВИЗУАЛИЗАЦИЯ РЕЗУЛЬТАТОВ")
+
+fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+# График функции потерь
+axes[0].plot(range(1, epochs + 1), losses, 'b-', linewidth=2)
+axes[0].set_xlabel('Эпоха')
+axes[0].set_ylabel('Потеря')
+axes[0].set_title('Функция потерь во время обучения')
+axes[0].grid(True, alpha=0.3)
+
+if task_type == 'classification':
+    # Визуализация классификации
+    with torch.no_grad():
+        # Создаем сетку для визуализации границы решения
+        x_min, x_max = X[:, 0].min() - 1, X[:, 0].max() + 1
+        y_min, y_max = X[:, 1].min() - 1, X[:, 1].max() + 1
+        xx, yy = np.meshgrid(np.arange(x_min, x_max, 1),
+                           np.arange(y_min, y_max, 1000))
+        
+        # Предсказания для сетки
+        grid = torch.Tensor(np.c_[xx.ravel(), yy.ravel()])
+        Z = model(grid)
+        Z = (Z > 0.5).float().numpy()
+        Z = Z.reshape(xx.shape)
+        
+        # Рисуем границу решения
+        axes[1].contourf(xx, yy, Z, alpha=0.3, cmap='RdYlBu')
+        
+        # Рисуем точки данных
+        colors = ['blue' if val == 0 else 'red' for val in y.numpy().flatten()]
+        scatter = axes[1].scatter(X[:, 0], X[:, 1], c=colors, edgecolors='k', s=50)
+        
+        axes[1].set_xlabel('Возраст')
+        axes[1].set_ylabel('Доход')
+        axes[1].set_title('Граница решения классификатора')
+        
+        # Создаем легенду вручную
+        from matplotlib.patches import Patch
+        legend_elements = [
+            Patch(facecolor='blue', edgecolor='k', label='Не купит'),
+            Patch(facecolor='red', edgecolor='k', label='Купит')
+        ]
+        axes[1].legend(handles=legend_elements)
+        
+else:
+    # Визуализация регрессии
+    with torch.no_grad():
+        # Сортируем данные для гладкого графика
+        sorted_indices = torch.argsort(X[:, 0])
+        X_sorted = X[sorted_indices]
+        y_sorted = y[sorted_indices]
+        predictions_sorted = predictions[sorted_indices]
+        
+        # Рисуем исходные данные
+        axes[1].scatter(X_sorted[:, 0], y_sorted[:, 0], alpha=0.5, 
+                       label='Фактические данные', color='blue')
+        
+        # Рисуем линию регрессии
+        axes[1].plot(X_sorted[:, 0], predictions_sorted[:, 0], 
+                    'r-', linewidth=2, label='Прогноз модели')
+        
+        axes[1].set_xlabel('Возраст')
+        axes[1].set_ylabel('Доход')
+        axes[1].set_title('Результаты регрессии')
+        axes[1].legend()
+        axes[1].grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+
+# 7. Дополнительный анализ
+print("\n" + "=" * 70)
+print("7. ДОПОЛНИТЕЛЬНЫЙ АНАЛИЗ")
+
+if task_type == 'classification':
+    print("  Анализ важности признаков:")
+    # Получаем веса первого слоя
+    first_layer_weights = model.layers[0].weight.data.numpy()
+    feature_importance = np.abs(first_layer_weights).mean(axis=0)
+    
+    features = ['Возраст', 'Доход']
+    for feat, imp in zip(features, feature_importance):
+        print(f"    {feat}: {imp:.4f}")
+    
+    # Определяем, какой признак важнее
+    if feature_importance[0] > feature_importance[1]:
+        print("  Вывод: Возраст более важный признак для прогноза покупки")
+    else:
+        print("  Вывод: Доход более важный признак для прогноза покупки")
+
+else:
+    print("  Анализ зависимости дохода от возраста:")
+    # Линейная регрессия для сравнения (вычисляем вручную без scikit-learn)
+    X_np = X.numpy().flatten()
+    y_np = y.numpy().flatten()
+    
+    # Вычисляем коэффициенты линейной регрессии вручную
+    n = len(X_np)
+    x_mean = np.mean(X_np)
+    y_mean = np.mean(y_np)
+    
+    # Вычисляем коэффициенты
+    numerator = np.sum((X_np - x_mean) * (y_np - y_mean))
+    denominator = np.sum((X_np - x_mean) ** 2)
+    
+    if denominator != 0:
+        b1 = numerator / denominator  # наклон
+        b0 = y_mean - b1 * x_mean  # intercept
+        
+        # Предсказания линейной регрессии
+        y_pred_lr = b0 + b1 * X_np
+        
+        # Вычисляем MSE
+        mse_lr = np.mean((y_np - y_pred_lr) ** 2)
+        
+        print(f"  Линейная регрессия: доход = {b0:.0f} + {b1:.0f} * возраст")
+        print(f"  Линейная регрессия MSE: {mse_lr:.2f}")
+        print(f"  Нейронная сеть MSE: {mse.item():.2f}")
+        
+        if mse.item() < mse_lr:
+            print("  Вывод: Нейронная сеть дает лучшие результаты, чем линейная регрессия")
+        else:
+            print("  Вывод: Линейная регрессия работает не хуже нейронной сети")
+    else:
+        print("  Невозможно вычислить линейную регрессию (деление на ноль)")
+
+# 8. Сохранение модели
+print("\n" + "=" * 70)
+print("8. СОХРАНЕНИЕ МОДЕЛИ")
+
+model_name = 'customer_classification_model.pth' if task_type == 'classification' else 'income_prediction_model.pth'
+torch.save(model.state_dict(), model_name)
+print(f"  Модель сохранена в файл: {model_name}")
+
+print("\n" + "=" * 70)
+print("ЗАДАНИЕ ВЫПОЛНЕНО УСПЕШНО!")
+print("=" * 70)
