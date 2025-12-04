@@ -1,0 +1,731 @@
+# -*- coding: utf-8 -*-
+"""
+Задание: Классификация изображений с Transfer Learning
+Создание собственного датасета и использование предобученной сети
+"""
+
+import os
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.optim import lr_scheduler
+import torchvision
+from torchvision import datasets, models, transforms
+import numpy as np
+import matplotlib.pyplot as plt
+import time
+import copy
+from PIL import Image
+
+print("=" * 80)
+print("ЗАДАНИЕ: КЛАССИФИКАЦИЯ ИЗОБРАЖЕНИЙ С ТРАНСФЕРНЫМ ОБУЧЕНИЕМ")
+print("=" * 80)
+
+# 0. СОЗДАНИЕ ВСЕХ НЕОБХОДИМЫХ ПАПОК В НАЧАЛЕ
+print("\n0. СОЗДАНИЕ ВСЕХ НЕОБХОДИМЫХ ПАПОК:")
+
+# Определяем основную папку для данных
+base_data_dir = r'C:\Users\Юрий\Documents\ИТК\ПГУ\Магистрат\ВТ\2КУРС\Нейронные\my_custom_dataset'
+
+# Создаем папку results заранее
+results_dir = os.path.join(base_data_dir, 'results')
+os.makedirs(results_dir, exist_ok=True)
+print(f"✓ Папка для результатов создана: {results_dir}")
+
+# 1. СОЗДАНИЕ СТРУКТУРЫ ПАПОК ДЛЯ ДАННЫХ
+print("\n1. СОЗДАНИЕ СТРУКТУРЫ ПАПОК ДЛЯ ДАННЫХ:")
+
+# Создаем структуру папок (пример для 3 классов)
+# ИЗМЕНИТЕ ЭТИ НАЗВАНИЯ КЛАССОВ НА СВОИ!
+data_structure = {
+    'train': ['cats', 'dogs', 'birds'],  # 3 класса для обучения
+    'val': ['cats', 'dogs', 'birds'],    # 3 класса для валидации
+    'test': ['cats', 'dogs', 'birds']    # 3 класса для тестирования
+}
+
+print("ВАЖНО: Если у вас другие названия классов, измените список data_structure в коде!")
+print(f"Текущие классы: {data_structure['train']}")
+
+# Создаем папки, если они не существуют
+for split in data_structure:
+    split_dir = os.path.join(base_data_dir, split)
+    os.makedirs(split_dir, exist_ok=True)
+    print(f"\n  Папка: {split_dir}")
+    
+    for class_name in data_structure[split]:
+        class_dir = os.path.join(split_dir, class_name)
+        os.makedirs(class_dir, exist_ok=True)
+        
+        # Проверяем, есть ли изображения в папке
+        if os.path.exists(class_dir):
+            image_files = [f for f in os.listdir(class_dir) 
+                          if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.gif'))]
+            print(f"    {class_name}: {len(image_files)} изображений")
+            
+            # Показываем первые 3 файла
+            if image_files:
+                print(f"      Примеры: {', '.join(image_files[:3])}")
+                if len(image_files) > 3:
+                    print(f"      ... и ещё {len(image_files) - 3} файлов")
+            else:
+                print(f"      ⚠ Нет изображений! Добавьте файлы в эту папку")
+        else:
+            print(f"    {class_name}: папка не существует")
+
+# 2. ПРОВЕРКА НАЛИЧИЯ РЕАЛЬНЫХ ИЗОБРАЖЕНИЙ
+print("\n2. ПРОВЕРКА НАЛИЧИЯ РЕАЛЬНЫХ ИЗОБРАЖЕНИЙ:")
+
+total_images = 0
+has_images = False
+
+for split in data_structure:
+    split_dir = os.path.join(base_data_dir, split)
+    split_images = 0
+    
+    for class_name in data_structure[split]:
+        class_dir = os.path.join(split_dir, class_name)
+        
+        if os.path.exists(class_dir):
+            image_files = [f for f in os.listdir(class_dir) 
+                          if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.gif'))]
+            
+            split_images += len(image_files)
+            total_images += len(image_files)
+            
+            if len(image_files) > 0:
+                has_images = True
+    
+    print(f"  {split.upper()}: {split_images} изображений")
+
+if not has_images:
+    print("\n✗ ОШИБКА: Не найдено ни одного изображения!")
+    print("  Поместите реальные фотографии в папки:")
+    print(f"  {base_data_dir}/train/[class_name]/")
+    print(f"  {base_data_dir}/val/[class_name]/")
+    print(f"  {base_data_dir}/test/[class_name]/")
+    print("\n  Пример структуры:")
+    print("  my_custom_dataset/")
+    print("  ├── train/")
+    print("  │   ├── cats/")
+    print("  │   │   ├── cat1.jpg")
+    print("  │   │   ├── cat2.jpg")
+    print("  │   │   └── ...")
+    print("  │   ├── dogs/")
+    print("  │   └── birds/")
+    print("  ├── val/")
+    print("  │   ├── cats/")
+    print("  │   ├── dogs/")
+    print("  │   └── birds/")
+    print("  └── test/")
+    print("      ├── cats/")
+    print("      ├── dogs/")
+    print("      └── birds/")
+    exit(1)
+
+print(f"\n✓ Всего найдено {total_images} реальных изображений")
+
+# 3. ПРЕДПРОСМОТР ИЗОБРАЖЕНИЙ
+print("\n3. ПРЕДПРОСМОТР ИЗОБРАЖЕНИЙ:")
+
+def show_sample_images():
+    """Показывает по одному изображению из каждого класса"""
+    fig, axes = plt.subplots(1, len(data_structure['train']), figsize=(15, 5))
+    
+    if len(data_structure['train']) == 1:
+        axes = [axes]
+    
+    for idx, class_name in enumerate(data_structure['train']):
+        class_dir = os.path.join(base_data_dir, 'train', class_name)
+        
+        if os.path.exists(class_dir):
+            image_files = [f for f in os.listdir(class_dir) 
+                          if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.gif'))]
+            
+            if image_files:
+                # Берем первое изображение
+                img_path = os.path.join(class_dir, image_files[0])
+                
+                try:
+                    img = Image.open(img_path)
+                    img.thumbnail((200, 200))  # Уменьшаем для отображения
+                    
+                    axes[idx].imshow(img)
+                    axes[idx].set_title(f'{class_name}\n{image_files[0]}')
+                    axes[idx].axis('off')
+                    
+                    print(f"  {class_name}: {img.size} пикселей")
+                    
+                except Exception as e:
+                    axes[idx].text(0.5, 0.5, f'Ошибка\nзагрузки', 
+                                 ha='center', va='center', transform=axes[idx].transAxes)
+                    axes[idx].axis('off')
+                    print(f"  {class_name}: ошибка загрузки - {e}")
+            else:
+                axes[idx].text(0.5, 0.5, 'Нет\nизображений', 
+                             ha='center', va='center', transform=axes[idx].transAxes)
+                axes[idx].axis('off')
+                print(f"  {class_name}: нет изображений")
+        else:
+            axes[idx].text(0.5, 0.5, 'Папка\nне найдена', 
+                         ha='center', va='center', transform=axes[idx].transAxes)
+            axes[idx].axis('off')
+            print(f"  {class_name}: папка не найдена")
+    
+    plt.suptitle('Примеры реальных изображений (по одному из каждого класса)', fontsize=14)
+    plt.tight_layout()
+    plt.show()
+
+show_sample_images()
+
+# 4. ЗАГРУЗКА ДАННЫХ С ПРЕОБРАЗОВАНИЯМИ
+print("\n4. ЗАГРУЗКА ДАННЫХ И ПРЕОБРАЗОВАНИЯ:")
+
+# Преобразования для обучающих данных (с аугментацией для улучшения обобщения)
+data_transforms = {
+    'train': transforms.Compose([
+        transforms.RandomResizedCrop(224),  # Случайное обрезание
+        transforms.RandomHorizontalFlip(),  # Случайное отражение
+        transforms.RandomRotation(15),      # Случайный поворот ±15 градусов
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ]),
+    'val': transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ]),
+    'test': transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ]),
+}
+
+print("  Создаю ImageFolder datasets...")
+
+# Создаем датасеты
+image_datasets = {}
+for x in ['train', 'val', 'test']:
+    split_dir = os.path.join(base_data_dir, x)
+    
+    try:
+        image_datasets[x] = datasets.ImageFolder(split_dir, data_transforms[x])
+        print(f"    {x}: успешно загружено {len(image_datasets[x])} изображений")
+        
+        # Проверяем баланс классов
+        if x == 'train':
+            print("      Распределение по классам:")
+            class_counts = {}
+            for _, label in image_datasets[x].samples:
+                class_name = image_datasets[x].classes[label]
+                class_counts[class_name] = class_counts.get(class_name, 0) + 1
+            
+            for class_name, count in class_counts.items():
+                print(f"        {class_name}: {count} изображений")
+        
+    except Exception as e:
+        print(f"    ✗ {x}: ошибка загрузки - {e}")
+        print(f"      Проверьте папку: {split_dir}")
+        print(f"      Убедитесь, что в подпапках есть изображения")
+        exit(1)
+
+# Определяем размеры датасетов
+dataset_sizes = {x: len(image_datasets[x]) for x in ['train', 'val', 'test']}
+class_names = image_datasets['train'].classes
+
+print(f"\n  Итоговая информация:")
+print(f"    Классы: {class_names}")
+print(f"    Количество классов: {len(class_names)}")
+print(f"    Размер обучающего набора: {dataset_sizes['train']} изображений")
+print(f"    Размер валидационного набора: {dataset_sizes['val']} изображений")
+print(f"    Размер тестового набора: {dataset_sizes['test']} изображений")
+
+# 5. СОЗДАНИЕ DATALOADERS
+print("\n5. СОЗДАНИЕ DATALOADERS:")
+
+batch_size = 8  # Размер пакета (можно увеличить если есть много памяти)
+print(f"  Размер пакета: {batch_size}")
+
+dataloaders = {}
+for x in ['train', 'val', 'test']:
+    dataloaders[x] = torch.utils.data.DataLoader(
+        image_datasets[x], 
+        batch_size=batch_size,
+        shuffle=True if x == 'train' else False,
+        num_workers=0  # 0 для стабильной работы в Spyder
+    )
+    print(f"    {x}: {len(dataloaders[x])} пакетов")
+
+# 6. ВИЗУАЛИЗАЦИЯ ПРЕОБРАЗОВАННЫХ ДАННЫХ
+print("\n6. ВИЗУАЛИЗАЦИЯ ПРЕОБРАЗОВАННЫХ ДАННЫХ:")
+
+def imshow(inp, title=None):
+    """Показывает тензор как изображение"""
+    inp = inp.numpy().transpose((1, 2, 0))
+    mean = np.array([0.485, 0.456, 0.406])
+    std = np.array([0.229, 0.224, 0.225])
+    inp = std * inp + mean
+    inp = np.clip(inp, 0, 1)
+    plt.imshow(inp)
+    if title is not None:
+        plt.title(title)
+    plt.axis('off')
+
+# Получаем один пакет данных
+try:
+    inputs, classes = next(iter(dataloaders['train']))
+    
+    # Создаем сетку изображений
+    out = torchvision.utils.make_grid(inputs)
+    
+    # Показываем изображения
+    plt.figure(figsize=(12, 6))
+    imshow(out, title=[class_names[x] for x in classes])
+    plt.tight_layout()
+    plt.show()
+    
+    print(f"  Показано {batch_size} изображений после преобразований")
+    
+except Exception as e:
+    print(f"  Не удалось показать изображения: {e}")
+
+# 7. ВЫБОР И НАСТРОЙКА ПРЕДОБУЧЕННОЙ МОДЕЛИ
+print("\n7. ВЫБОР И НАСТРОЙКА ПРЕДОБУЧЕННОЙ МОДЕЛИ:")
+
+print("  Доступные предобученные модели:")
+print("    1. ResNet18 (рекомендуется - хороший баланс скорости и точности)")
+print("    2. ResNet34 (глубже, точнее, но медленнее)")
+print("    3. AlexNet (простая, быстрая)")
+print("    4. VGG16 (точная, но требует много памяти)")
+print("    5. MobileNetV2 (быстрая, для мобильных устройств)")
+
+# Выбираем модель
+model_name = 'resnet18'  # Можно изменить
+print(f"\n  Выбрана модель: {model_name.upper()}")
+
+# Загружаем предобученную модель
+print("  Загружаю модель...")
+try:
+    if model_name == 'resnet18':
+        model = models.resnet18(pretrained=True)
+    elif model_name == 'resnet34':
+        model = models.resnet34(pretrained=True)
+    elif model_name == 'alexnet':
+        model = models.alexnet(pretrained=True)
+    elif model_name == 'vgg16':
+        model = models.vgg16(pretrained=True)
+    elif model_name == 'mobilenet_v2':
+        model = models.mobilenet_v2(pretrained=True)
+    else:
+        model = models.resnet18(pretrained=True)
+    
+    print(f"  ✓ Модель {model_name.upper()} успешно загружена")
+    
+except Exception as e:
+    print(f"✗ Ошибка при загрузке модели: {e}")
+    print("  Возможные причины:")
+    print("  1. Нет подключения к интернету")
+    print("  2. Проблемы с доступом к серверу PyTorch")
+    print("  Решение: используйте offline режим или проверьте подключение")
+    exit(1)
+
+# "Замораживаем" все слои кроме последнего
+print("  'Замораживаю' все слои кроме последнего...")
+for param in model.parameters():
+    param.requires_grad = False
+
+# Модифицируем последний слой для нашего количества классов
+num_classes = len(class_names)
+
+try:
+    if model_name.startswith('resnet'):
+        num_ftrs = model.fc.in_features
+        model.fc = nn.Linear(num_ftrs, num_classes)
+        print(f"  ✓ Заменен полносвязный слой на {num_classes} выходов")
+    elif model_name == 'alexnet':
+        num_ftrs = model.classifier[6].in_features
+        model.classifier[6] = nn.Linear(num_ftrs, num_classes)
+        print(f"  ✓ Заменен последний слой классификатора")
+    elif model_name == 'vgg16':
+        num_ftrs = model.classifier[6].in_features
+        model.classifier[6] = nn.Linear(num_ftrs, num_classes)
+        print(f"  ✓ Заменен последний слой классификатора")
+    elif model_name == 'mobilenet_v2':
+        num_ftrs = model.classifier[1].in_features
+        model.classifier[1] = nn.Linear(num_ftrs, num_classes)
+        print(f"  ✓ Заменен последний слой классификатора")
+    
+except Exception as e:
+    print(f"✗ Ошибка при модификации модели: {e}")
+    exit(1)
+
+# Перемещаем модель на устройство
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+model = model.to(device)
+print(f"  ✓ Модель перемещена на устройство: {device}")
+
+# 8. ОБУЧЕНИЕ МОДЕЛИ
+print("\n8. ОБУЧЕНИЕ МОДЕЛИ:")
+
+# Функция потерь
+criterion = nn.CrossEntropyLoss()
+
+# Оптимизатор (только для последнего слоя)
+optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+
+# Планировщик скорости обучения
+scheduler = lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.1)
+
+# Функция для обучения модели
+def train_model(model, criterion, optimizer, scheduler, num_epochs=5):
+    since = time.time()
+    
+    best_model_wts = copy.deepcopy(model.state_dict())
+    best_acc = 0.0
+    
+    train_losses = []
+    val_losses = []
+    train_accs = []
+    val_accs = []
+    
+    for epoch in range(num_epochs):
+        print(f'\nЭпоха {epoch+1}/{num_epochs}')
+        print('-' * 40)
+        
+        # Каждая эпоха имеет фазы обучения и валидации
+        for phase in ['train', 'val']:
+            if phase == 'train':
+                model.train()  # Режим обучения
+            else:
+                model.eval()   # Режим оценки
+            
+            running_loss = 0.0
+            running_corrects = 0
+            
+            # Итерация по данным
+            for inputs, labels in dataloaders[phase]:
+                inputs = inputs.to(device)
+                labels = labels.to(device)
+                
+                # Обнуляем градиенты
+                optimizer.zero_grad()
+                
+                # Прямой проход
+                with torch.set_grad_enabled(phase == 'train'):
+                    outputs = model(inputs)
+                    _, preds = torch.max(outputs, 1)
+                    loss = criterion(outputs, labels)
+                    
+                    # Обратный проход + оптимизация только в фазе обучения
+                    if phase == 'train':
+                        loss.backward()
+                        optimizer.step()
+                
+                # Статистика
+                running_loss += loss.item() * inputs.size(0)
+                running_corrects += torch.sum(preds == labels.data)
+            
+            if phase == 'train':
+                scheduler.step()
+            
+            epoch_loss = running_loss / dataset_sizes[phase]
+            epoch_acc = running_corrects.double() / dataset_sizes[phase]
+            
+            if phase == 'train':
+                train_losses.append(epoch_loss)
+                train_accs.append(epoch_acc.item())
+            else:
+                val_losses.append(epoch_loss)
+                val_accs.append(epoch_acc.item())
+            
+            print(f'{phase} Потеря: {epoch_loss:.4f}, Точность: {epoch_acc:.4f}')
+            
+            # Сохраняем лучшую модель
+            if phase == 'val' and epoch_acc > best_acc:
+                best_acc = epoch_acc
+                best_model_wts = copy.deepcopy(model.state_dict())
+        
+        print()
+    
+    time_elapsed = time.time() - since
+    print(f'Обучение завершено за {time_elapsed // 60:.0f} мин {time_elapsed % 60:.0f} сек')
+    print(f'Лучшая точность на валидации: {best_acc:.4f}')
+    
+    # Загружаем веса лучшей модели
+    model.load_state_dict(best_model_wts)
+    
+    return model, train_losses, val_losses, train_accs, val_accs
+
+# Параметры обучения
+num_epochs = 5  # Можно увеличить для лучших результатов
+print(f"  Количество эпох: {num_epochs}")
+print("  Начинаю обучение...")
+
+# Обучаем модель
+try:
+    model, train_losses, val_losses, train_accs, val_accs = train_model(
+        model, criterion, optimizer, scheduler, num_epochs=num_epochs
+    )
+    print("  ✓ Обучение завершено успешно")
+except Exception as e:
+    print(f"✗ Ошибка при обучении: {e}")
+    exit(1)
+
+# 9. ВИЗУАЛИЗАЦИЯ РЕЗУЛЬТАТОВ ОБУЧЕНИЯ
+print("\n9. ВИЗУАЛИЗАЦИЯ РЕЗУЛЬТАТОВ ОБУЧЕНИЯ:")
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+# График функции потерь
+axes[0].plot(range(1, len(train_losses) + 1), train_losses, 'b-', label='Обучающая', linewidth=2)
+axes[0].plot(range(1, len(val_losses) + 1), val_losses, 'r-', label='Валидационная', linewidth=2)
+axes[0].set_xlabel('Эпоха')
+axes[0].set_ylabel('Потеря')
+axes[0].set_title('Функция потерь')
+axes[0].legend()
+axes[0].grid(True, alpha=0.3)
+
+# График точности
+axes[1].plot(range(1, len(train_accs) + 1), train_accs, 'b-', label='Обучающая', linewidth=2)
+axes[1].plot(range(1, len(val_accs) + 1), val_accs, 'r-', label='Валидационная', linewidth=2)
+axes[1].set_xlabel('Эпоха')
+axes[1].set_ylabel('Точность')
+axes[1].set_title('Точность классификации')
+axes[1].legend()
+axes[1].grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+
+# 10. ТЕСТИРОВАНИЕ МОДЕЛИ
+print("\n10. ТЕСТИРОВАНИЕ МОДЕЛИ НА ТЕСТОВОМ НАБОРЕ:")
+
+model.eval()  # Режим оценки
+
+test_correct = 0
+test_total = 0
+class_correct = list(0. for i in range(num_classes))
+class_total = list(0. for i in range(num_classes))
+
+with torch.no_grad():
+    for inputs, labels in dataloaders['test']:
+        inputs = inputs.to(device)
+        labels = labels.to(device)
+        
+        outputs = model(inputs)
+        _, predicted = torch.max(outputs, 1)
+        
+        test_total += labels.size(0)
+        test_correct += (predicted == labels).sum().item()
+        
+        # Точность по классам
+        c = (predicted == labels).squeeze()
+        for i in range(len(labels)):
+            label = labels[i]
+            class_correct[label] += c[i].item()
+            class_total[label] += 1
+
+test_accuracy = 100 * test_correct / test_total if test_total > 0 else 0
+print(f"  Общая точность на тестовом наборе: {test_accuracy:.2f}%")
+print(f"  Правильно классифицировано: {test_correct}/{test_total}")
+
+print("\n  Точность по классам:")
+for i in range(num_classes):
+    if class_total[i] > 0:
+        accuracy = 100 * class_correct[i] / class_total[i]
+        print(f"    {class_names[i]}: {accuracy:.1f}% ({int(class_correct[i])}/{int(class_total[i])})")
+
+# 11. ДЕМОНСТРАЦИЯ РАБОТЫ МОДЕЛИ
+print("\n11. ДЕМОНСТРАЦИЯ РАБОТЫ МОДЕЛИ:")
+
+def visualize_predictions(model, num_images=6):
+    model.eval()
+    images_so_far = 0
+    fig = plt.figure(figsize=(15, 10))
+    
+    with torch.no_grad():
+        for i, (inputs, labels) in enumerate(dataloaders['test']):
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+            
+            outputs = model(inputs)
+            _, preds = torch.max(outputs, 1)
+            
+            for j in range(inputs.size()[0]):
+                images_so_far += 1
+                ax = plt.subplot(num_images//2, 3, images_so_far)
+                ax.axis('off')
+                
+                # Показываем изображение
+                img = inputs.cpu().data[j]
+                imshow(img)
+                
+                true_label = class_names[labels[j]]
+                pred_label = class_names[preds[j]]
+                
+                color = 'green' if preds[j] == labels[j] else 'red'
+                ax.set_title(f'Истинный: {true_label}\nПредсказано: {pred_label}', 
+                           color=color, fontsize=12, fontweight='bold')
+                
+                if images_so_far == num_images:
+                    plt.suptitle('Примеры классификации реальных изображений', fontsize=14, fontweight='bold')
+                    plt.tight_layout()
+                    plt.show()
+                    return
+    
+    plt.suptitle('Примеры классификации реальных изображений', fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    plt.show()
+
+print("  Показываю примеры классификации...")
+visualize_predictions(model, num_images=9)
+
+# 12. СОХРАНЕНИЕ МОДЕЛИ И РЕЗУЛЬТАТОВ
+print("\n12. СОХРАНЕНИЕ МОДЕЛИ И РЕЗУЛЬТАТОВ:")
+
+print(f"  Сохраняю результаты в: {results_dir}")
+
+# Сохраняем модель
+model_path = os.path.join(results_dir, f'{model_name}_real_images.pth')
+print(f"\n  Сохраняю модель в: {model_path}")
+
+try:
+    torch.save({
+        'model_state_dict': model.state_dict(),
+        'class_names': class_names,
+        'model_name': model_name,
+        'test_accuracy': test_accuracy,
+        'num_epochs': num_epochs,
+        'input_size': 224,
+        'transform_info': 'ImageNet normalization'
+    }, model_path)
+    print(f"  ✓ Модель успешно сохранена")
+    
+    # Проверяем размер файла
+    if os.path.exists(model_path):
+        file_size = os.path.getsize(model_path) / 1024
+        print(f"  Размер файла: {file_size:.1f} KB")
+    
+except Exception as e:
+    print(f"  ✗ Ошибка при сохранении модели: {e}")
+    print("  Пробую сохранить упрощенную версию...")
+    try:
+        torch.save(model.state_dict(), os.path.join(results_dir, f'{model_name}_simple.pth'))
+        print("  ✓ Упрощенная версия модели сохранена")
+    except Exception as e2:
+        print(f"  ✗ Не удалось сохранить модель: {e2}")
+
+# Сохраняем графики
+graph_path = os.path.join(results_dir, 'training_results.png')
+try:
+    plt.figure(figsize=(12, 5))
+    
+    plt.subplot(1, 2, 1)
+    plt.plot(range(1, len(train_losses) + 1), train_losses, 'b-', label='Обучающая', linewidth=2)
+    plt.plot(range(1, len(val_losses) + 1), val_losses, 'r-', label='Валидационная', linewidth=2)
+    plt.xlabel('Эпоха')
+    plt.ylabel('Потеря')
+    plt.title('Функция потерь')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    plt.subplot(1, 2, 2)
+    plt.plot(range(1, len(train_accs) + 1), train_accs, 'b-', label='Обучающая', linewidth=2)
+    plt.plot(range(1, len(val_accs) + 1), val_accs, 'r-', label='Валидационная', linewidth=2)
+    plt.xlabel('Эпоха')
+    plt.ylabel('Точность')
+    plt.title('Точность классификации')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    plt.suptitle(f'Результаты обучения на реальных изображениях\nМодель: {model_name.upper()}', fontsize=14)
+    plt.tight_layout()
+    plt.savefig(graph_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"  ✓ Графики сохранены: {graph_path}")
+except Exception as e:
+    print(f"  ✗ Ошибка при сохранении графиков: {e}")
+
+# Создаем текстовый отчет
+report_path = os.path.join(results_dir, 'training_report.txt')
+try:
+    with open(report_path, 'w', encoding='utf-8') as f:
+        f.write("=" * 70 + "\n")
+        f.write("ОТЧЕТ ПО ОБУЧЕНИЮ КЛАССИФИКАТОРА ИЗОБРАЖЕНИЙ НА РЕАЛЬНЫХ ДАННЫХ\n")
+        f.write("=" * 70 + "\n\n")
+        
+        f.write(f"Дата выполнения: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Использованная модель: {model_name.upper()}\n")
+        f.write(f"Устройство обучения: {device}\n")
+        f.write(f"Директория с данными: {base_data_dir}\n\n")
+        
+        f.write("КЛАССЫ ИЗОБРАЖЕНИЙ:\n")
+        for i, cls in enumerate(class_names):
+            f.write(f"  {i}. {cls}\n")
+        
+        f.write(f"\nРАЗМЕРЫ ДАТАСЕТОВ:\n")
+        f.write(f"  Обучающий набор: {dataset_sizes['train']} изображений\n")
+        f.write(f"  Валидационный набор: {dataset_sizes['val']} изображений\n")
+        f.write(f"  Тестовый набор: {dataset_sizes['test']} изображений\n\n")
+        
+        f.write("ПАРАМЕТРЫ ОБУЧЕНИЯ:\n")
+        f.write(f"  Количество эпох: {num_epochs}\n")
+        f.write(f"  Размер пакета: {batch_size}\n")
+        f.write(f"  Learning rate: 0.001\n")
+        f.write(f"  Оптимизатор: SGD с momentum=0.9\n")
+        f.write(f"  Функция потерь: CrossEntropyLoss\n\n")
+        
+        f.write("РЕЗУЛЬТАТЫ ОБУЧЕНИЯ:\n")
+        f.write("=" * 50 + "\n")
+        if len(val_accs) > 0:
+            best_val_acc = max(val_accs) * 100
+            f.write(f"Лучшая точность на валидации: {best_val_acc:.2f}%\n")
+        f.write(f"Точность на тестовом наборе: {test_accuracy:.2f}%\n")
+        f.write(f"Правильно классифицировано: {test_correct}/{test_total}\n\n")
+        
+        f.write("ТОЧНОСТЬ ПО КЛАССАМ (тестовый набор):\n")
+        for i in range(num_classes):
+            if class_total[i] > 0:
+                accuracy = 100 * class_correct[i] / class_total[i]
+                f.write(f"  {class_names[i]}: {accuracy:.1f}% ({int(class_correct[i])}/{int(class_total[i])})\n")
+        
+        f.write("\nДОПОЛНИТЕЛЬНАЯ ИНФОРМАЦИЯ:\n")
+        f.write(f"  Модель сохранена в: {model_path}\n")
+        f.write(f"  Графики сохранены в: {graph_path}\n")
+        f.write(f"  Датасет содержит реальные изображения\n")
+        
+        f.write("\n" + "=" * 70 + "\n")
+    
+    print(f"  ✓ Отчет сохранен: {report_path}")
+except Exception as e:
+    print(f"  ✗ Ошибка при создании отчета: {e}")
+
+# 13. ЗАКЛЮЧЕНИЕ
+print("\n" + "=" * 80)
+print("ЗАДАНИЕ ВЫПОЛНЕНО УСПЕШНО!")
+print("=" * 80)
+print(f"ОБУЧЕНА МОДЕЛЬ НА РЕАЛЬНЫХ ИЗОБРАЖЕНИЯХ")
+print("=" * 80)
+print(f"Количество классов: {len(class_names)}")
+for i, cls in enumerate(class_names):
+    print(f"  {i+1}. {cls}")
+
+print(f"\nИспользована модель: {model_name.upper()}")
+print(f"Итоговая точность: {test_accuracy:.2f}%")
+
+print(f"\nВсе результаты сохранены в папке:")
+print(f"  {results_dir}")
+print(f"\nСодержимое папки результатов:")
+try:
+    for file in os.listdir(results_dir):
+        file_path = os.path.join(results_dir, file)
+        if os.path.isfile(file_path):
+            size = os.path.getsize(file_path) / 1024
+            print(f"  - {file} ({size:.1f} KB)")
+except:
+    print("  (не удалось прочитать содержимое папки)")
+
+print("\n" + "=" * 80)
