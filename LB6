@@ -1,0 +1,81 @@
+[
+  {
+    "predictions": {
+      "inference_id": "c916d4ab-ceb6-4c35-9d52-5fc355a15ae8",
+      "time": 0.005032715038396418,
+      "image": {
+        "width": 224,
+        "height": 224
+      },
+      "predictions": [
+        {
+          "class": "cats",
+          "class_id": 2,
+          "confidence": 0.9429
+        }
+      ],
+      "top": "cats",
+      "confidence": 0.9429,
+      "prediction_type": "classification",
+      "parent_id": "image",
+      "root_parent_id": "image"
+    }
+  }
+]
+
+
+
+[
+  {
+    "predictions": {
+      "inference_id": "916f73ea-fed0-4b2c-82ee-4974bd80009e",
+      "time": 0.0065095000027213246,
+      "image": {
+        "width": 800,
+        "height": 600
+      },
+      "predictions": [
+        {
+          "class": "dogs",
+          "class_id": 1,
+          "confidence": 0.9559
+        }
+      ],
+      "top": "dogs",
+      "confidence": 0.9559,
+      "prediction_type": "classification",
+      "parent_id": "image",
+      "root_parent_id": "image"
+    }
+  }
+]
+
+
+ 
+[
+  {
+    "predictions": {
+      "inference_id": "bdcb197c-d7ba-4420-8b9c-6f1ab2117d43",
+      "time": 0.02005096198990941,
+      "image": {
+        "width": 224,
+        "height": 224
+      },
+      "predictions": [
+        {
+          "class": "birds",
+          "class_id": 0,
+          "confidence": 0.8164
+        }
+      ],
+      "top": "birds",
+      "confidence": 0.8164,
+      "prediction_type": "classification",
+      "parent_id": "image",
+      "root_parent_id": "image"
+    }
+  }
+]
+
+ 
+
