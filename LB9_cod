@@ -1,0 +1,139 @@
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+from langchain_huggingface import HuggingFacePipeline, ChatHuggingFace
+from langgraph.prebuilt import create_react_agent
+from langchain.tools import tool
+import torch
+from datetime import datetime
+import pytz
+
+# Загрузка модели и создание LLM
+model_id = "Qwen/Qwen3-4B"
+
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+model = AutoModelForCausalLM.from_pretrained(
+    model_id,
+    device_map="auto",
+    dtype=torch.float16,
+)
+
+pipe = pipeline(
+    "text-generation",
+    model=model,
+    tokenizer=tokenizer,
+    max_new_tokens=1024,
+    temperature=0.3,
+    top_p=0.95,
+    repetition_penalty=1.2
+)
+
+llm = HuggingFacePipeline(pipeline=pipe)
+chat_model = ChatHuggingFace(llm=llm)
+
+# Создание инструмента для получения текущего московского времени (MSK)
+@tool("current_date_msk", description="ТОЧНОЕ ТЕКУЩЕЕ время в Москве. Используй этот инструмент для ЛЮБЫХ вопросов о дате, времени, дне недели в Москве.")
+def get_current_date_msk(query: str = "") -> str:
+    """Возвращает текущую дату и время для московского часового пояса (MSK)."""
+    msk_timezone = pytz.timezone('Europe/Moscow')
+    now_msk = datetime.now(msk_timezone)
+    
+    return (f"ТОЧНЫЕ ДАННЫЕ О ТЕКУЩЕМ ВРЕМЕНИ В МОСКВЕ:\n"
+            f"• Дата: {now_msk.strftime('%d.%m.%Y')}\n"
+            f"• Время: {now_msk.strftime('%H:%M:%S')}\n"
+            f"• День недели: {now_msk.strftime('%A')}\n"
+            f"• Часовой пояс: MSK (UTC+3)\n"
+            f"• Полная дата и время: {now_msk.strftime('%d.%m.%Y %H:%M:%S')}")
+
+# Создание агента с инструментом московского времени
+tools = [get_current_date_msk]
+
+# УСИЛЕННЫЙ системный промпт для принуждения к использованию инструмента
+system_prompt = """
+Ты - ассистент, который ВСЕГДА и ОБЯЗАТЕЛЬНО использует доступные инструменты для ответа на вопросы.
+
+У тебя есть доступ к инструменту 'current_date_msk', который возвращает АБСОЛЮТНО ТОЧНОЕ ТЕКУЩЕЕ время в Москве.
+
+КРИТИЧЕСКИ ВАЖНЫЕ ПРАВИЛА, КОТОРЫЕ ТЫ ДОЛЖЕН СОБЛЮДАТЬ:
+
+1. НИКОГДА НЕ пытайся отвечать на вопросы о дате, времени, дне недели или временной информации ИЗ СВОЕЙ ПАМЯТИ
+2. ТВОИ ВСТРОЕННЫЕ ЗНАНИЯ О ВРЕМЕНИ УСТАРЕЛИ - НЕ ДОВЕРЯЙ ИМ
+3. ВСЕГДА, АБСОЛЮТНО ВСЕГДА используй инструмент 'current_date_msk' для ЛЮБЫХ вопросов, связанных с:
+   - текущим временем
+   - текущей датой
+   - днём недели
+   - часовым поясом
+   - любыми временными метками
+4. Даже если вопрос кажется простым (например, "который час?" или "какая сегодня дата?") - ИСПОЛЬЗУЙ ИНСТРУМЕНТ
+5. После получения данных от инструмента, просто перескажи их пользователю в удобном формате
+6. Всегда упоминай, что информация получена через инструмент и является точной
+
+Пример правильного поведения:
+Вопрос: "Сколько сейчас времени?"
+Ты должен: 1) Вызвать инструмент current_date_msk, 2) Получить точные данные, 3) Ответить: "Согласно инструменту получения точного времени, сейчас в Москве..."
+
+Твоя основная задача - всегда использовать инструмент для вопросов о времени. Не думай, не рассуждай, просто используй инструмент.
+"""
+
+# Создание агента
+agent_executor = create_react_agent(chat_model, tools, prompt=system_prompt)
+
+# Тестирование агента
+print("=" * 70)
+print("ТЕСТ 1: Запрос текущего времени")
+print("=" * 70)
+input_message = {
+    "role": "user",
+    "content": "Сколько сейчас времени в Москве?"
+}
+
+result = agent_executor.invoke({"messages": [input_message]})
+
+print("\nПолный процесс работы агента:")
+print("-" * 50)
+for i, message in enumerate(result["messages"]):
+    if hasattr(message, 'type'):
+        print(f"Шаг {i+1} [{message.type}]:")
+        print(message.content)
+        print("-" * 30)
+    else:
+        print(f"Шаг {i+1}: {message}")
+
+print("\n" + "=" * 70)
+print("ТЕСТ 2: Запрос даты и дня недели")
+print("=" * 70)
+input_message = {
+    "role": "user",
+    "content": "Какая сегодня дата и день недели по московскому времени?"
+}
+
+result = agent_executor.invoke({"messages": [input_message]})
+
+print("\nКраткий ответ агента:")
+for message in result["messages"]:
+    if message.type == "ai" and hasattr(message, 'pretty_print'):
+        print("Финальный ответ:")
+        message.pretty_print()
+        break
+
+print("\n" + "=" * 70)
+print("ТЕСТ 3: Контрольный вопрос (проверка на галлюцинации)")
+print("=" * 70)
+input_message = {
+    "role": "user",
+    "content": "Какой сейчас год и месяц?"
+}
+
+result = agent_executor.invoke({"messages": [input_message]})
+
+# Выводим только финальный ответ
+for message in result["messages"]:
+    if message.type == "ai":
+        print("Ответ агента на вопрос 'Какой сейчас год и месяц?':")
+        print(message.content)
+        break
+
+# Дополнительная проверка: сравним с реальным временем
+print("\n" + "=" * 70)
+print("ПРОВЕРКА: Реальное московское время из инструмента")
+print("=" * 70)
+real_time = get_current_date_msk.invoke("")
+print(real_time)
